@@ -26,7 +26,7 @@ Tự động quét giá vé máy bay (cached) theo lịch cố định trong ng�
 - Python batch pipeline (Extract + Stage + Load + Alert)
 - Cron trên VPS
 - Google BigQuery (warehouse) + GCS (staging NDJSON)
-- Travelpayouts `prices_for_dates`
+- SerpAPI `google_flights`
 - Telegram Bot (1 chat)
 - 5 chặng cố định, origin = `DAD`
 - Transform bằng **SQL trên BigQuery**
@@ -52,7 +52,7 @@ Tự động quét giá vé máy bay (cached) theo lịch cố định trong ng�
 |---|---|
 | Cron (`Asia/Ho_Chi_Minh`) | Kích hoạt pipeline theo lịch |
 | ELT Worker (Python) | Extract → NDJSON → Load BQ → chạy SQL Transform → Alert |
-| Travelpayouts API | Nguồn giá cached |
+| SerpAPI Google Flights | Nguồn giá (Google Flights via SerpAPI) |
 | GCS | Staging file NDJSON trước Load Job |
 | BigQuery | Warehouse: raw + snapshots + alerts |
 | Telegram Bot | Kênh cảnh báo |
@@ -85,51 +85,54 @@ Tự động quét giá vé máy bay (cached) theo lịch cố định trong ng�
 
 ---
 
-## 6. Extract — Travelpayouts API
+## 6. Extract — SerpAPI Google Flights
 
-### Endpoint `[FACT]`
+### Client `[MVP DECISION]`
 
-```text
-GET https://api.travelpayouts.com/aviasales/v3/prices_for_dates
+```python
+import serpapi
+
+client = serpapi.Client(api_key=SERPAPI_API_KEY)
+results = client.search({...})
+best_flights = results["best_flights"]
 ```
 
-### Bản chất dữ liệu `[FACT]`
+### Bản chất dữ liệu `[MVP DECISION]`
 
-- Giá vé rẻ theo tìm kiếm của users Aviasales (cached, khoảng **48 giờ**)
-- **Không** phải giá booking realtime
-- Rate limit tham chiếu: **~600 req/phút**; vượt → HTTP **429**
+- Giá từ Google Flights qua SerpAPI
+- SerpAPI cần `outbound_date` dạng **`YYYY-MM-DD`** (không nhận tháng)
+- MVP lấy **1 ngày mẫu / tháng** để giữ volume và baseline key theo tháng
 
-### Auth `[FACT]`
+### Auth `[MVP DECISION]`
 
-- Header `X-Access-Token: <TOKEN>` (ưu tiên), hoặc query `token=`
+- Env: `SERPAPI_API_KEY`
+- Query params cố định: `config/serpapi_query.json`
 
 ### Params MVP `[MVP DECISION]`
 
 | Param | Value | Ghi chú |
 |---|---|---|
-| `origin` | `DAD` | Cố định |
-| `destination` | theo bảng routes | |
-| `departure_at` | `YYYY-MM` | Horizon: **tháng hiện tại + 2 tháng tới** |
-| `one_way` | `true` | |
-| `return_at` | *(omit)* | Không dùng round-trip |
-| `direct` | `false` | Cho phép nối chuyến |
-| `currency` | `usd` | **Không dùng `cy`** |
-| `sorting` | `price` | |
-| `unique` | `false` | |
-| `limit` | `30` | |
-| `page` | `1` | |
-| `market` | `vn` | Nếu lỗi/empty kéo dài → fallback `ru` + log |
+| `engine` | `google_flights` | config |
+| `type` | `2` | one-way (config) |
+| `currency` | `VND` | config |
+| `hl` / `gl` | `vi` / `vn` | config |
+| `departure_id` | `DAD` | từ routes |
+| `arrival_id` | theo bảng routes | |
+| `outbound_date` | `YYYY-MM-DD` | sample: tháng hiện tại → ngày mai; tháng khác → ngày 15 |
+
+Horizon vẫn: **tháng hiện tại + 2 tháng tới** (`HORIZON_MONTHS=3`).  
+Baseline key vẫn: `(origin, destination, departure_month)`.
 
 ### Volume mỗi run
 
-`5 routes × 3 months = 15` HTTP calls / run  
-`× 5 runs/ngày = 75` calls/ngày → an toàn so với 600/phút.
+`5 routes × 3 months = 15` SerpAPI searches / run  
+`× 5 runs/ngày = 75` searches/ngày — theo dõi quota/billing SerpAPI.
 
 ### API Discovery
 
 | Bắt buộc MVP | Optional / sau MVP |
 |---|---|
-| `/aviasales/v3/prices_for_dates` + token + rate limit docs | Airports/cities dictionaries, month/week matrix, calendar, special offers, Discord, deep-link builder |
+| SerpAPI `google_flights` + `best_flights` | Nhiều ngày/tháng, `other_flights`, deep-link booking |
 
 ---
 
@@ -172,10 +175,10 @@ Transform chạy bằng **SQL trên BigQuery** (`sql/bq_transform.sql`) sau khi 
 ### Giá đại diện của một query
 
 ```text
-current = min(price) trong response.data
+current = min(price) trong response.best_flights
 ```
 
-Nếu `data` rỗng → không tạo snapshot giá; không alert cho key đó.
+Nếu `best_flights` rỗng / thiếu → không tạo snapshot giá; không alert cho key đó.
 
 ### Khóa so sánh (baseline key)
 
@@ -216,7 +219,7 @@ Python đọc `alert_candidates` → gửi Telegram → insert `alerts`.
 | Tình huống | Hành vi |
 |---|---|
 | `< 3` snapshot / 7 ngày | Load raw (+ snapshot nếu có giá); **không alert** |
-| `data: []` | Raw OK; skip snapshot/alert |
+| `best_flights` empty/missing | Raw OK; skip snapshot/alert |
 | HTTP 429 | Log; retry 1 lần sau ~5s; không chặn route khác |
 | 401/403 / timeout sau retry | Ghi lỗi; tiếp tục route khác |
 | Load BQ fail | Không Transform/Alert cho run đó; log rõ |
@@ -233,8 +236,8 @@ Python đọc `alert_candidates` → gửi Telegram → insert `alerts`.
 
 - Route label + IATA (`DAD → HAN`)
 - `departure_month`
-- `current_price` (USD)
-- `baseline` (USD)
+- `current_price` (VND)
+- `baseline` (VND)
 - `drop_pct`
 - `airline`, `transfers` (nếu có)
 - `queried_at` (ICT)
@@ -274,7 +277,7 @@ Chi tiết: `sql/bq_ddl.sql`, `sql/bq_transform.sql`.
 
 Secrets qua `.env` (không commit token / SA key):
 
-- `TRAVELPAYOUTS_TOKEN`
+- `SERPAPI_API_KEY`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `GCP_PROJECT_ID`, `BQ_DATASET`, `GCS_BUCKET`
 - `GOOGLE_APPLICATION_CREDENTIALS` (path tới SA JSON)
@@ -283,29 +286,27 @@ Secrets qua `.env` (không commit token / SA key):
 
 ## 12. Smoke test ngày 1
 
-```http
-GET https://api.travelpayouts.com/aviasales/v3/prices_for_dates
-  ?origin=DAD
-  &destination=HAN
-  &departure_at=2026-11
-  &one_way=true
-  &direct=false
-  &currency=usd
-  &sorting=price
-  &unique=false
-  &limit=30
-  &page=1
-  &market=vn
-Header: X-Access-Token: <TOKEN>
+```python
+import serpapi
+
+client = serpapi.Client(api_key="<SERPAPI_API_KEY>")
+results = client.search({
+  "engine": "google_flights",
+  "departure_id": "DAD",
+  "arrival_id": "HAN",
+  "currency": "VND",
+  "type": "2",
+  "outbound_date": "2026-11-10",
+})
+best_flights = results["best_flights"]
 ```
 
 Checklist:
 
-1. `success: true` và có `data[].price`
-2. Xác nhận đang dùng `currency` (không `cy`)
+1. Có `best_flights` và phần tử có `price`
+2. Currency trong config là `VND`
 3. Thử lần lượt `SGN`, `BKK`, `SIN`, `PQC`
-4. Nếu `market=vn` kém → thử `market=ru` và ghi nhận
-5. Chạy 1 cycle pipeline: raw xuất hiện trên BQ **trước** khi Transform
+4. Chạy 1 cycle pipeline: raw xuất hiện trên BQ **trước** khi Transform
 
 ---
 
@@ -318,24 +319,25 @@ Checklist:
 5. **Alert:** Đủ warm-up ≥3 và `drop_pct > 20` → Telegram đủ field; ghi `alerts`.
 6. **Anti-spam:** Không gửi lại cùng key trong 24h.
 7. **Warm-up:** `<3` snapshot → không alert.
-8. **API hygiene:** Path có `/aviasales/`; param tiền tệ là `currency=usd`.
+8. **API hygiene:** SerpAPI `engine=google_flights`; currency từ `config/serpapi_query.json`.
 9. **No CSV on hot path:** Staging raw là NDJSON, không CSV.
 10. **Deploy:** Chạy trên VPS bằng Cron + SA; secret không nằm trong git.
-11. **Narrative:** Bảo vệ gọi đúng **ELT** + BigQuery; nêu giới hạn cached ~48h.
+11. **Narrative:** Bảo vệ gọi đúng **ELT** + BigQuery; nêu date-sampling (1 ngày/tháng).
 
 ---
 
 ## 14. Implementation checklist
 
 - [x] `docs/MVP_SPEC.md` (BigQuery ELT)
-- [ ] Smoke test API với token thật (`DAD-HAN` trước)
+- [ ] Smoke test SerpAPI với key thật (`DAD-HAN` trước)
 - [x] Tạo DDL/SQL BQ (`sql/bq_ddl.sql`, `sql/bq_transform.sql`)
 - [x] `config/routes.json` (5 chặng DAD-*)
+- [x] `config/serpapi_query.json` (query params)
 - [x] Worker: extract → stage NDJSON → load → transform SQL → alert
 - [x] Cron template 5 slots + TZ (`crontab`)
 - [x] `.env.example` + `.gitignore` (SA key)
-- [ ] Deploy VPS + thử 1 run tay (cần GCP + token thật)
-- [x] README: cách chạy, ELT, hạn chế cached data
+- [ ] Deploy VPS + thử 1 run tay (cần GCP + SerpAPI key thật)
+- [x] README: cách chạy, ELT, date-sampling SerpAPI
 
 ---
 
@@ -343,10 +345,10 @@ Checklist:
 
 | Risk | Mitigation |
 |---|---|
-| Example docs dùng `cy` | MVP bắt buộc `currency=usd` |
-| Giá cached ≠ giá mua | Nêu rõ trong báo cáo |
+| SerpAPI cần ngày, MVP so theo tháng | 1 ngày mẫu/tháng; nêu rõ trong báo cáo |
+| Quota / billing SerpAPI | Theo dõi 75 searches/ngày |
 | CSV làm mất nested JSON | Chỉ NDJSON cho raw |
-| SA key lộ | `.gitignore`; không commit |
+| SA key / SerpAPI key lộ | `.gitignore`; không commit |
 | Một số chặng data mỏng | Smoke test; đổi destination sau nếu cần |
 | Warm-up làm demo chưa alert | Seed / chạy ≥3 chu kỳ |
 
@@ -363,7 +365,9 @@ Checklist:
 | Warm-up | ≥ 3 snapshots |
 | Anti-spam | 24 giờ / baseline key |
 | Channel | Telegram only |
-| Currency param | `currency=usd` (không `cy`) |
+| Currency param | `currency=VND` (config) |
+| Source | SerpAPI `google_flights` / `best_flights` |
+| Date sampling | 1 `outbound_date` / tháng |
 | Horizon | Tháng hiện tại + 2 tháng |
 | Architecture | **ELT** |
 | Warehouse | **BigQuery** (thay PostgreSQL) |

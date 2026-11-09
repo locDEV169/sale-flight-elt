@@ -1,6 +1,7 @@
 -- Transform step for one pipeline run (parameter: @run_id)
 -- Placeholder __DATASET__ is replaced by the worker from BQ_DATASET.
 -- Run after raw NDJSON has been loaded into raw_flight_prices.
+-- Source payload: SerpAPI google_flights (best_flights[]).
 
 -- 1) Build price_snapshots for this run from raw payloads
 INSERT INTO `__DATASET__.price_snapshots`
@@ -12,10 +13,11 @@ WITH raw_offers AS (
     r.origin,
     r.destination,
     r.departure_month,
+    JSON_VALUE(r.request_params, '$.currency') AS currency,
     offer
   FROM `__DATASET__.raw_flight_prices` AS r
   CROSS JOIN UNNEST(
-    IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.data'), [])
+    IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.best_flights'), [])
   ) AS offer
   WHERE r.run_id = @run_id
     AND r.http_status = 200
@@ -28,12 +30,16 @@ picked AS (
     origin,
     destination,
     departure_month,
+    COALESCE(ANY_VALUE(currency), 'VND') AS currency,
     ARRAY_AGG(
       STRUCT(
         SAFE_CAST(JSON_VALUE(offer, '$.price') AS FLOAT64) AS price,
-        JSON_VALUE(offer, '$.airline') AS airline,
-        SAFE_CAST(JSON_VALUE(offer, '$.transfers') AS INT64) AS transfers,
-        JSON_VALUE(offer, '$.link') AS link
+        JSON_VALUE(offer, '$.flights[0].airline') AS airline,
+        GREATEST(
+          ARRAY_LENGTH(IFNULL(JSON_EXTRACT_ARRAY(offer, '$.flights'), [])) - 1,
+          0
+        ) AS transfers,
+        CAST(NULL AS STRING) AS link
       )
       ORDER BY SAFE_CAST(JSON_VALUE(offer, '$.price') AS FLOAT64) ASC
       LIMIT 1
@@ -49,7 +55,7 @@ SELECT
   destination,
   departure_month,
   best.price,
-  'usd' AS currency,
+  currency,
   best.airline,
   best.transfers,
   best.link

@@ -1,6 +1,6 @@
 # sale-flight — Flight Price Tracker (ELT + BigQuery)
 
-Pipeline **ELT** theo dõi giá vé cached từ Travelpayouts, Load raw vào **Google BigQuery**, Transform bằng SQL, cảnh báo **Telegram** khi giảm sâu.
+Pipeline **ELT** theo dõi giá vé Google Flights qua **SerpAPI**, Load raw vào **Google BigQuery**, Transform bằng SQL, cảnh báo **Telegram** khi giảm sâu.
 
 Chi tiết nghiệp vụ: [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md).
 
@@ -8,18 +8,18 @@ Chi tiết nghiệp vụ: [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md).
 
 ```text
 Cron (ICT 00/05/10/15/20)
-  → Extract Travelpayouts (DAD → HAN/SGN/BKK/SIN/PQC × 3 tháng)
+  → Extract SerpAPI Google Flights (DAD → HAN/SGN/BKK/SIN/PQC × 3 tháng, 1 ngày mẫu/tháng)
   → Stage NDJSON (không CSV — payload nested)
   → Load GCS → BigQuery raw_flight_prices
   → Transform SQL (snapshots + alert_candidates)
   → Alert Telegram → ghi alerts
 ```
 
-Giá Travelpayouts là **cached (~48h)**, không phải giá booking realtime.
+Mỗi tháng lấy **1 `outbound_date` mẫu** (tháng hiện tại → ngày mai; tháng sau → ngày 15) vì SerpAPI cần ngày cụ thể, không nhận `YYYY-MM`.
 
 ## Vì sao NDJSON, không CSV?
 
-Raw response có `data[]` lồng nhau. CSV dễ mất cấu trúc. MVP dùng **NDJSON → GCS → BigQuery Load Job**.
+Raw response có `best_flights[]` lồng nhau. CSV dễ mất cấu trúc. MVP dùng **NDJSON → GCS → BigQuery Load Job**.
 
 ## Setup nhanh
 
@@ -41,8 +41,10 @@ source .venv/Scripts/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-# Điền token Travelpayouts, Telegram, GCP_*
+# Điền SERPAPI_API_KEY, Telegram, GCP_*
 ```
+
+Query params SerpAPI nằm ở [`config/serpapi_query.json`](config/serpapi_query.json) (engine, type, currency, …).
 
 ### 3. Schema BigQuery (một lần)
 
@@ -76,7 +78,7 @@ Xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
 
 ## Rule alert (tóm tắt)
 
-- `current = min(price)` trong response  
+- `current = min(price)` trong `best_flights`  
 - `baseline = MIN` snapshot 7 ngày trước (cùng origin/destination/month)  
 - Alert nếu warm-up ≥ 3 snapshots, `drop_pct > 20`, chưa alert cùng key trong 24h  
 
@@ -91,13 +93,14 @@ python -m pytest tests/ -q
 ```text
 main.py
 elt/
-  extract/travelpayouts.py      # E — source connector
+  extract/serpapi_flights.py    # E — SerpAPI Google Flights
   load/stage.py                 # NDJSON staging
   load/bigquery.py              # L — GCS + BQ load
   transform/runner.py           # T — run sql/
   alert/telegram.py             # notify
   pipeline.py / cli.py / config.py
 config/routes.json
+config/serpapi_query.json
 sql/bq_ddl.sql
 sql/bq_transform.sql
 scripts/init_bq_schema.py

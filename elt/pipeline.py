@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from elt.alert import process_alerts
-from elt.config import get_settings, load_routes
+from elt.config import get_settings, load_routes, load_serpapi_query
 from elt.extract import extract_all
 from elt.load import load_raw_ndjson, upload_to_gcs, write_ndjson
 from elt.transform import apply_ddl, fetch_alert_candidates, run_transform
@@ -34,6 +34,7 @@ def _release_lock() -> None:
 def run_once(*, init_schema: bool = False) -> None:
     settings = get_settings()
     routes = load_routes(settings.routes_path)
+    query_defaults = load_serpapi_query(settings.serpapi_query_path)
     run_id = str(uuid.uuid4())
     queried_at = (
         datetime.now(timezone.utc)
@@ -53,12 +54,10 @@ def run_once(*, init_schema: bool = False) -> None:
 
         logger.info("run_id=%s starting extract", run_id)
         rows = extract_all(
-            token=settings.travelpayouts_token,
+            api_key=settings.serpapi_api_key,
             routes=routes,
-            currency=settings.currency,
-            market=settings.market,
+            query_defaults=query_defaults,
             horizon_months=settings.horizon_months,
-            api_base=settings.api_base,
             run_id=run_id,
             queried_at_iso=queried_at,
         )

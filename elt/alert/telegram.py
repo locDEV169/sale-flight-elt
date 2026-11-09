@@ -35,8 +35,8 @@ def format_message(
         "Flight price drop alert",
         f"Route: {label} ({origin} -> {destination})",
         f"Departure month: {candidate.get('departure_month')}",
-        f"Current: {candidate.get('price')} {candidate.get('currency', 'usd')}",
-        f"Baseline (MIN 7d): {candidate.get('baseline')} {candidate.get('currency', 'usd')}",
+        f"Current: {candidate.get('price')} {candidate.get('currency', 'VND')}",
+        f"Baseline (MIN 7d): {candidate.get('baseline')} {candidate.get('currency', 'VND')}",
         f"Drop: {drop_txt}",
         f"Airline: {candidate.get('airline') or 'n/a'}",
         f"Transfers: {candidate.get('transfers') if candidate.get('transfers') is not None else 'n/a'}",
@@ -44,10 +44,7 @@ def format_message(
     ]
     link = candidate.get("link")
     if link:
-        if str(link).startswith("/"):
-            lines.append(f"Link: https://www.aviasales.com{link}")
-        else:
-            lines.append(f"Link: {link}")
+        lines.append(f"Link: {link}")
     return "\n".join(lines)
 
 
@@ -89,7 +86,7 @@ def record_alert(
         "price": float(candidate["price"]),
         "baseline": float(candidate["baseline"]),
         "drop_pct": float(candidate["drop_pct"]),
-        "currency": candidate.get("currency") or "usd",
+        "currency": candidate.get("currency") or "VND",
         "airline": candidate.get("airline"),
         "transfers": candidate.get("transfers"),
         "link": candidate.get("link"),
