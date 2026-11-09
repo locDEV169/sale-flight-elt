@@ -1,0 +1,26 @@
+# Secrets
+.env
+secrets/
+**/gcp-sa*.json
+*service-account*.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Staging NDJSON / locks
+staging/*
+!staging/.gitkeep
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+# Install on VPS (example):
+#   crontab -e
+# Paste below after setting absolute paths and ensuring .env + SA are ready.
+# TZ must be Asia/Ho_Chi_Minh for 5x/day every 5 hours (MVP_SPEC).
+
+SHELL=/bin/bash
+TZ=Asia/Ho_Chi_Minh
+PATH=/usr/local/bin:/usr/bin:/bin
+
+0 0,5,10,15,20 * * * cd /opt/sale-flight && /opt/sale-flight/.venv/bin/python main.py >> /var/log/sale-flight.log 2>&1
