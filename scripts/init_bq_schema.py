@@ -18,8 +18,12 @@ def main() -> None:
         project_id=settings.gcp_project_id,
         dataset=settings.bq_dataset,
         ddl_path=settings.sql_dir / "bq_ddl.sql",
+        location=settings.bq_location,
     )
-    print(f"OK: schema applied to dataset {settings.bq_dataset}")
+    print(
+        f"OK: schema applied to dataset {settings.bq_dataset} "
+        f"(location={settings.bq_location})"
+    )
 
 
 if __name__ == "__main__":

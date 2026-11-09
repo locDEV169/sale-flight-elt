@@ -50,6 +50,7 @@ def run_once(*, init_schema: bool = False) -> None:
                 project_id=settings.gcp_project_id,
                 dataset=settings.bq_dataset,
                 ddl_path=settings.sql_dir / "bq_ddl.sql",
+                location=settings.bq_location,
             )
 
         logger.info("run_id=%s starting extract", run_id)
@@ -57,7 +58,7 @@ def run_once(*, init_schema: bool = False) -> None:
             api_key=settings.serpapi_api_key,
             routes=routes,
             query_defaults=query_defaults,
-            horizon_months=settings.horizon_months,
+            horizon_days=settings.horizon_days,
             run_id=run_id,
             queried_at_iso=queried_at,
         )
@@ -75,6 +76,7 @@ def run_once(*, init_schema: bool = False) -> None:
             project_id=settings.gcp_project_id,
             dataset=settings.bq_dataset,
             gcs_uri=gcs_uri,
+            location=settings.bq_location,
         )
 
         run_transform(
@@ -82,11 +84,13 @@ def run_once(*, init_schema: bool = False) -> None:
             dataset=settings.bq_dataset,
             sql_path=settings.sql_dir / "bq_transform.sql",
             run_id=run_id,
+            location=settings.bq_location,
         )
 
         candidates = fetch_alert_candidates(
             project_id=settings.gcp_project_id,
             dataset=settings.bq_dataset,
+            location=settings.bq_location,
         )
         logger.info("alert candidates: %s", len(candidates))
         sent = process_alerts(
@@ -96,6 +100,7 @@ def run_once(*, init_schema: bool = False) -> None:
             chat_id=settings.telegram_chat_id,
             candidates=candidates,
             routes=routes,
+            location=settings.bq_location,
         )
         logger.info("run_id=%s done; alerts_sent=%s", run_id, sent)
     finally:

@@ -1,9 +1,5 @@
 {
   "routes": [
-    {"origin": "DAD", "destination": "HAN", "label": "Da Nang -> Ha Noi"},
-    {"origin": "DAD", "destination": "SGN", "label": "Da Nang -> Ho Chi Minh City"},
-    {"origin": "DAD", "destination": "BKK", "label": "Da Nang -> Bangkok"},
-    {"origin": "DAD", "destination": "SIN", "label": "Da Nang -> Singapore"},
-    {"origin": "DAD", "destination": "PQC", "label": "Da Nang -> Phu Quoc"}
+    {"origin": "DAD", "destination": "SGN", "label": "Da Nang -> Ho Chi Minh City"}
   ]
 }

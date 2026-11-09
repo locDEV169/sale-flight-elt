@@ -1,15 +1,9 @@
 """Extract stage — source connectors."""
 
-from elt.extract.serpapi_flights import (
-    departure_months,
-    extract_all,
-    fetch_prices,
-    sample_outbound_date,
-)
+from elt.extract.serpapi_flights import extract_all, fetch_prices, outbound_dates
 
 __all__ = [
-    "departure_months",
     "extract_all",
     "fetch_prices",
-    "sample_outbound_date",
+    "outbound_dates",
 ]

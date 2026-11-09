@@ -13,36 +13,26 @@ import serpapi
 logger = logging.getLogger(__name__)
 
 
-def departure_months(horizon_months: int, today: date | None = None) -> list[str]:
-    """Return YYYY-MM for current month + (horizon_months - 1) following months."""
-    base = today or date.today()
-    year, month = base.year, base.month
-    out: list[str] = []
-    for _ in range(horizon_months):
-        out.append(f"{year:04d}-{month:02d}")
-        month += 1
-        if month > 12:
-            month = 1
-            year += 1
-    return out
-
-
-def sample_outbound_date(year_month: str, today: date | None = None) -> str:
+def outbound_dates(horizon_days: int, today: date | None = None) -> list[str]:
     """
-    Pick one YYYY-MM-DD per month for SerpAPI (needs a concrete date).
-    Current month → tomorrow (clamped to month end); other months → day 15.
+    Return YYYY-MM-DD from today through today+horizon_days (inclusive).
+    Example: horizon_days=3 → 4 dates.
     """
+    if horizon_days < 0:
+        raise ValueError("horizon_days must be >= 0")
     base = today or date.today()
-    year_s, month_s = year_month.split("-", 1)
-    year, month = int(year_s), int(month_s)
+    return [(base + timedelta(days=i)).isoformat() for i in range(horizon_days + 1)]
 
-    if year == base.year and month == base.month:
-        candidate = base + timedelta(days=1)
-        if candidate.month != month:
-            candidate = base
-        return candidate.isoformat()
 
-    return date(year, month, 15).isoformat()
+def _as_payload_dict(results: Any) -> dict[str, Any] | None:
+    """Normalize serpapi Client.search() output to a plain dict."""
+    if isinstance(results, dict):
+        return results
+    as_dict = getattr(results, "as_dict", None)
+    if callable(as_dict):
+        data = as_dict()
+        return data if isinstance(data, dict) else None
+    return None
 
 
 def fetch_prices(
@@ -62,20 +52,22 @@ def fetch_prices(
     for attempt in range(2):
         try:
             results = client.search(query)
-            if not isinstance(results, dict):
+            payload = _as_payload_dict(results)
+            if payload is None:
                 return {}, 0, f"unexpected result type: {type(results)!r}"
 
             # SerpAPI often embeds error info in the JSON body.
-            if results.get("error"):
-                last_error = str(results["error"])[:500]
-                last_status = int(results.get("status") or 400)
+            if payload.get("error"):
+                last_error = str(payload["error"])[:500]
+                last_status = int(payload.get("status") or 400)
                 if attempt == 0 and last_status in (429, 500, 502, 503, 504):
                     logger.warning("retryable serpapi error %s; sleep 5s", last_error)
                     time.sleep(5)
                     continue
-                return results, last_status, last_error
+                return payload, last_status, last_error
 
-            return results, 200, None
+            # Full response kept as-is (best_flights, other_flights, price_insights, …).
+            return payload, 200, None
         except Exception as exc:  # noqa: BLE001 — network/SDK surface is broad
             last_error = str(exc)[:500]
             last_status = 0
@@ -93,19 +85,18 @@ def extract_all(
     api_key: str,
     routes: list[dict],
     query_defaults: dict[str, Any],
-    horizon_months: int,
+    horizon_days: int,
     run_id: str,
     queried_at_iso: str,
     today: date | None = None,
 ) -> list[dict[str, Any]]:
-    """Extract all route × month combinations into raw row dicts."""
+    """Extract all route × outbound-date combinations into raw row dicts."""
     rows: list[dict[str, Any]] = []
-    months = departure_months(horizon_months, today=today)
+    dates = outbound_dates(horizon_days, today=today)
     for route in routes:
         origin = route["origin"]
         destination = route["destination"]
-        for month in months:
-            outbound_date = sample_outbound_date(month, today=today)
+        for outbound_date in dates:
             request_params = {
                 **query_defaults,
                 "departure_id": origin,
@@ -116,13 +107,15 @@ def extract_all(
                 api_key=api_key,
                 query=request_params,
             )
+            # ponytail: reuse departure_month STRING column to store YYYY-MM-DD
+            # so baseline key is per flight date without a schema migration.
             rows.append(
                 {
                     "run_id": run_id,
                     "queried_at": queried_at_iso,
                     "origin": origin,
                     "destination": destination,
-                    "departure_month": month,
+                    "departure_month": outbound_date,
                     "request_params": json.dumps(request_params, ensure_ascii=False),
                     "payload": json.dumps(payload, ensure_ascii=False)
                     if payload
@@ -132,10 +125,9 @@ def extract_all(
                 }
             )
             logger.info(
-                "extracted %s-%s %s outbound=%s status=%s",
+                "extracted %s-%s outbound=%s status=%s",
                 origin,
                 destination,
-                month,
                 outbound_date,
                 status,
             )

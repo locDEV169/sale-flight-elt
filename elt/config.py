@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
+# Must match sql/bq_ddl.sql OPTIONS(location=...)
+BQ_LOCATION = "asia-southeast1"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -22,7 +25,8 @@ class Settings:
     gcp_project_id: str
     bq_dataset: str
     gcs_bucket: str
-    horizon_months: int
+    bq_location: str
+    horizon_days: int
     routes_path: Path
     serpapi_query_path: Path
     sql_dir: Path
@@ -40,6 +44,8 @@ def get_settings() -> Settings:
     if not project or not bucket:
         raise RuntimeError("GCP_PROJECT_ID and GCS_BUCKET are required")
 
+    location = os.environ.get("BQ_LOCATION", BQ_LOCATION).strip() or BQ_LOCATION
+
     return Settings(
         serpapi_api_key=api_key,
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -47,7 +53,8 @@ def get_settings() -> Settings:
         gcp_project_id=project,
         bq_dataset=dataset,
         gcs_bucket=bucket,
-        horizon_months=int(os.environ.get("HORIZON_MONTHS", "3")),
+        bq_location=location,
+        horizon_days=int(os.environ.get("HORIZON_DAYS", "0")),
         routes_path=ROOT / "config" / "routes.json",
         serpapi_query_path=ROOT / "config" / "serpapi_query.json",
         sql_dir=ROOT / "sql",

@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 import requests
 from google.cloud import bigquery
 
+from elt.config import BQ_LOCATION
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ def format_message(
     lines = [
         "Flight price drop alert",
         f"Route: {label} ({origin} -> {destination})",
-        f"Departure month: {candidate.get('departure_month')}",
+        f"Departure date: {candidate.get('departure_month')}",
         f"Current: {candidate.get('price')} {candidate.get('currency', 'VND')}",
         f"Baseline (MIN 7d): {candidate.get('baseline')} {candidate.get('currency', 'VND')}",
         f"Drop: {drop_txt}",
@@ -74,8 +76,9 @@ def record_alert(
     candidate: dict[str, Any],
     telegram_message_id: str | None,
     status: str = "sent",
+    location: str = BQ_LOCATION,
 ) -> None:
-    client = bigquery.Client(project=project_id)
+    client = bigquery.Client(project=project_id, location=location)
     table_id = f"{project_id}.{dataset}.alerts"
     row = {
         "alert_id": str(uuid.uuid4()),
@@ -108,6 +111,7 @@ def process_alerts(
     chat_id: str,
     candidates: list[dict[str, Any]],
     routes: list[dict],
+    location: str = BQ_LOCATION,
 ) -> int:
     labels = {(r["origin"], r["destination"]): r.get("label", "") for r in routes}
     sent = 0
@@ -121,6 +125,7 @@ def process_alerts(
                 candidate=candidate,
                 telegram_message_id=message_id,
                 status="sent",
+                location=location,
             )
             sent += 1
             logger.info(

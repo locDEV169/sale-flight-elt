@@ -8,14 +8,14 @@ Chi tiết nghiệp vụ: [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md).
 
 ```text
 Cron (ICT 00/05/10/15/20)
-  → Extract SerpAPI Google Flights (DAD → HAN/SGN/BKK/SIN/PQC × 3 tháng, 1 ngày mẫu/tháng)
+  → Extract SerpAPI Google Flights (DAD → SGN × hôm nay..+HORIZON_DAYS)
   → Stage NDJSON (không CSV — payload nested)
   → Load GCS → BigQuery raw_flight_prices
   → Transform SQL (snapshots + alert_candidates)
   → Alert Telegram → ghi alerts
 ```
 
-Mỗi tháng lấy **1 `outbound_date` mẫu** (tháng hiện tại → ngày mai; tháng sau → ngày 15) vì SerpAPI cần ngày cụ thể, không nhận `YYYY-MM`.
+Mặc định `HORIZON_DAYS=0` → **1** search/run (chỉ `today`), chặng **DAD → SGN**. Tăng số ngày khi cần.
 
 ## Vì sao NDJSON, không CSV?
 
@@ -46,13 +46,20 @@ cp .env.example .env
 
 Query params SerpAPI nằm ở [`config/serpapi_query.json`](config/serpapi_query.json) (engine, type, currency, …).
 
-### 3. Schema BigQuery (một lần)
+### 3. Smoke-check BigQuery
+
+```bash
+python scripts/check_bq.py
+# OK: project=... dataset=flight_elt location=asia-southeast1
+```
+
+### 4. Schema BigQuery (một lần)
 
 ```bash
 python scripts/init_bq_schema.py
 ```
 
-### 4. Chạy 1 cycle
+### 5. Chạy 1 cycle
 
 ```bash
 python main.py
@@ -62,7 +69,7 @@ python main.py --init-schema
 # python -m elt --init-schema
 ```
 
-### 5. Cron trên VPS
+### 6. Cron trên VPS
 
 Xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
 
@@ -70,16 +77,12 @@ Xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
 
 | Origin | Destination |
 |--------|-------------|
-| DAD | HAN |
 | DAD | SGN |
-| DAD | BKK |
-| DAD | SIN |
-| DAD | PQC |
 
 ## Rule alert (tóm tắt)
 
 - `current = min(price)` trong `best_flights`  
-- `baseline = MIN` snapshot 7 ngày trước (cùng origin/destination/month)  
+- `baseline = MIN` snapshot 7 ngày trước (cùng origin/destination/**ngày bay**)  
 - Alert nếu warm-up ≥ 3 snapshots, `drop_pct > 20`, chưa alert cùng key trong 24h  
 
 ## Test nhẹ
