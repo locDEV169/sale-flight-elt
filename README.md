@@ -53,6 +53,15 @@ python scripts/check_bq.py
 # OK: project=... dataset=flight_elt location=asia-southeast1
 ```
 
+### 3b. Smoke-check Telegram (fake alert, không ghi BQ)
+
+```bash
+python scripts/check_telegram.py
+# OK: telegram message sent chat_id=... message_id=...
+```
+
+`TELEGRAM_CHAT_ID` phải là user/group/channel id nhận tin (số), không dùng `@username` của bot.
+
 ### 4. Schema BigQuery (một lần)
 
 ```bash
