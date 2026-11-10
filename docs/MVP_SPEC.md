@@ -258,8 +258,8 @@ Chi tiết: `sql/bq_ddl.sql`, `sql/bq_transform.sql`.
 | Warehouse | Google BigQuery |
 | Transform | BigQuery SQL |
 | Notify | Telegram Bot |
-| Host | VPS (Ubuntu / cloud free-tier) |
-| Auth GCP | Service Account JSON |
+| Host | **Cloud Run Job + Cloud Scheduler** (Option A); VPS/GCE + cron vẫn được |
+| Auth GCP | Attached SA trên Cloud Run (local: SA JSON) |
 
 Secrets qua `.env` (không commit token / SA key):
 
@@ -306,7 +306,7 @@ Checklist:
 6. **Anti-spam:** Không gửi lại cùng key trong 24h.
 7. **API hygiene:** SerpAPI `engine=google_flights`; currency từ `config/serpapi_query.json`.
 8. **No CSV on hot path:** Staging raw là NDJSON, không CSV.
-9. **Deploy:** Chạy trên VPS bằng Cron + SA; secret không nằm trong git.
+9. **Deploy:** Cloud Run Job + Scheduler (hoặc VPS cron); secret không nằm trong git/image.
 10. **Narrative:** Bảo vệ gọi đúng **ELT** + BigQuery; nêu date-sampling (1 ngày/tháng).
 
 ---
@@ -321,7 +321,7 @@ Checklist:
 - [x] Worker: extract → stage NDJSON → load → transform SQL → alert
 - [x] Cron template 5 slots + TZ (`crontab`)
 - [x] `.env.example` + `.gitignore` (SA key)
-- [ ] Deploy VPS + thử 1 run tay (cần GCP + SerpAPI key thật)
+- [ ] Deploy Cloud Run Job + Scheduler (xem `docs/DEPLOY_CLOUD_RUN.md`)
 - [x] README: cách chạy, ELT, date-sampling SerpAPI
 
 ---

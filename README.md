@@ -78,9 +78,13 @@ python main.py --init-schema
 # python -m elt --init-schema
 ```
 
-### 6. Cron trên VPS
+### 6. Deploy
 
-Xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
+- **Option A (recommend):** Cloud Run Job + Cloud Scheduler — [`docs/DEPLOY_CLOUD_RUN.md`](docs/DEPLOY_CLOUD_RUN.md)  
+  Build/update job: `PROJECT_ID=... GCS_BUCKET=... ./scripts/deploy_cloud_run.sh`  
+  Check log / executions: §8 + nhật ký deploy §13 trong doc đó  
+  Sync secrets từ `.env` → Job: `PROJECT_ID=... ./scripts/sync_job_secrets_from_env.sh`
+- **VPS / GCE:** xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
 
 ## Routes MVP
 
@@ -117,6 +121,8 @@ config/serpapi_query.json
 sql/bq_ddl.sql
 sql/bq_migrate_flights_json.sql
 sql/bq_transform.sql
+Dockerfile                      # Cloud Run Job image
 scripts/init_bq_schema.py
-crontab                         # orchestration MVP (not Airflow)
+scripts/deploy_cloud_run.sh     # build + create/update Job
+crontab                         # VPS/GCE fallback
 ```
