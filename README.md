@@ -17,9 +17,10 @@ Cron (ICT 00/05/10/15/20)
 
 Mặc định `HORIZON_DAYS=0` → **1** search/run (chỉ `today`), chặng **DAD → SGN**. Tăng số ngày khi cần.
 
-## Vì sao NDJSON, không CSV?
+## NDJSON
 
 Raw response có `best_flights[]` lồng nhau. CSV dễ mất cấu trúc. MVP dùng **NDJSON → GCS → BigQuery Load Job**.
+Em dùng Json ở đây vì data của best_flight khi lấy từ raw data về có thể bị trùng nhau nên đang dùng Json để có thể dễ hơn trong việc compare data
 
 ## Setup nhanh
 
