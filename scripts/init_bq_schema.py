@@ -20,6 +20,13 @@ def main() -> None:
         ddl_path=settings.sql_dir / "bq_ddl.sql",
         location=settings.bq_location,
     )
+    # Existing datasets created before flights_json need ALTER (IF NOT EXISTS).
+    apply_ddl(
+        project_id=settings.gcp_project_id,
+        dataset=settings.bq_dataset,
+        ddl_path=settings.sql_dir / "bq_migrate_flights_json.sql",
+        location=settings.bq_location,
+    )
     print(
         f"OK: schema applied to dataset {settings.bq_dataset} "
         f"(location={settings.bq_location})"

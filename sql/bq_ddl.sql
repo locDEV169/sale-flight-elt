@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS `__DATASET__.price_snapshots` (
   currency STRING NOT NULL,
   airline STRING,
   transfers INT64,
-  link STRING
+  link STRING,
+  flights_json STRING,
+  total_duration INT64
 )
 PARTITION BY DATE(queried_at)
 CLUSTER BY origin, destination, departure_month;

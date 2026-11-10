@@ -90,9 +90,10 @@ Xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
 
 ## Rule alert (tóm tắt)
 
-- `current = min(price)` trong `best_flights`  
-- `baseline = MIN` snapshot 7 ngày trước (cùng origin/destination/**ngày bay**)  
-- Alert nếu warm-up ≥ 3 snapshots, `drop_pct > 20`, chưa alert cùng key trong 24h  
+- `current = min(price)` trong `best_flights`, fallback `other_flights` nếu best rỗng (kèm `flights_json` của offer thắng)
+- Có snapshot giá → candidate Telegram (chi tiết chuyến bay trong message)
+- Anti-spam: chưa alert cùng key `(origin, destination, ngày bay)` trong 24h  
+
 
 ## Test nhẹ
 
@@ -114,6 +115,7 @@ elt/
 config/routes.json
 config/serpapi_query.json
 sql/bq_ddl.sql
+sql/bq_migrate_flights_json.sql
 sql/bq_transform.sql
 scripts/init_bq_schema.py
 crontab                         # orchestration MVP (not Airflow)

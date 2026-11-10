@@ -24,16 +24,37 @@ def main() -> None:
     routes = load_routes(settings.routes_path)
     labels = {(r["origin"], r["destination"]): r.get("label", "") for r in routes}
     route = routes[0]
+    dep_date = datetime.now(timezone.utc).date().isoformat()
     candidate = {
         "origin": route["origin"],
         "destination": route["destination"],
-        "departure_month": datetime.now(timezone.utc).date().isoformat(),
+        "departure_month": dep_date,
         "price": 900_000.0,
-        "baseline": 1_200_000.0,
-        "drop_pct": 25.0,
+        "baseline": None,
+        "drop_pct": None,
         "currency": "VND",
         "airline": "Vietjet",
         "transfers": 0,
+        "total_duration": 85,
+        "flights_json": [
+            {
+                "departure_airport": {
+                    "name": "Da Nang International Airport",
+                    "id": route["origin"],
+                    "time": f"{dep_date} 08:00",
+                },
+                "arrival_airport": {
+                    "name": "Destination Airport",
+                    "id": route["destination"],
+                    "time": f"{dep_date} 09:25",
+                },
+                "duration": 85,
+                "airplane": "Airbus A321",
+                "airline": "Vietjet",
+                "travel_class": "Economy",
+                "flight_number": "VJ 123",
+            }
+        ],
         "queried_at": datetime.now(timezone.utc),
         "link": None,
     }

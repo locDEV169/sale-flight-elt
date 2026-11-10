@@ -1,11 +1,13 @@
 -- Transform step for one pipeline run (parameter: @run_id)
 -- Placeholder __DATASET__ is replaced by the worker from BQ_DATASET.
 -- Run after raw NDJSON has been loaded into raw_flight_prices.
--- Source payload: SerpAPI google_flights (best_flights[]).
+-- Source payload: SerpAPI google_flights.
+-- Offers: best_flights when non-empty; else other_flights (fallback).
 
 -- 1) Build price_snapshots for this run from raw payloads
 INSERT INTO `__DATASET__.price_snapshots`
-  (run_id, queried_at, origin, destination, departure_month, price, currency, airline, transfers, link)
+  (run_id, queried_at, origin, destination, departure_month, price, currency,
+   airline, transfers, link, flights_json, total_duration)
 WITH raw_offers AS (
   SELECT
     r.run_id,
@@ -17,7 +19,11 @@ WITH raw_offers AS (
     offer
   FROM `__DATASET__.raw_flight_prices` AS r
   CROSS JOIN UNNEST(
-    IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.best_flights'), [])
+    IF(
+      ARRAY_LENGTH(IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.best_flights'), [])) > 0,
+      IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.best_flights'), []),
+      IFNULL(JSON_EXTRACT_ARRAY(r.payload, '$.other_flights'), [])
+    )
   ) AS offer
   WHERE r.run_id = @run_id
     AND r.http_status = 200
@@ -39,7 +45,10 @@ picked AS (
           ARRAY_LENGTH(IFNULL(JSON_EXTRACT_ARRAY(offer, '$.flights'), [])) - 1,
           0
         ) AS transfers,
-        CAST(NULL AS STRING) AS link
+        CAST(NULL AS STRING) AS link,
+        -- Option B: keep winning offer's flights[] for Telegram formatting.
+        JSON_EXTRACT(offer, '$.flights') AS flights_json,
+        SAFE_CAST(JSON_VALUE(offer, '$.total_duration') AS INT64) AS total_duration
       )
       ORDER BY SAFE_CAST(JSON_VALUE(offer, '$.price') AS FLOAT64) ASC
       LIMIT 1
@@ -58,57 +67,19 @@ SELECT
   currency,
   best.airline,
   best.transfers,
-  best.link
+  best.link,
+  best.flights_json,
+  best.total_duration
 FROM picked
 WHERE best.price IS NOT NULL;
 
--- 2) Materialize alert_candidates for this run (warm-up, drop > 20%, anti-spam 24h)
+-- 2) alert_candidates: every snapshot this run, minus anti-spam 24h
+-- (no warm-up ≥3, no drop_pct > 20)
 CREATE OR REPLACE TABLE `__DATASET__.alert_candidates` AS
 WITH current_snap AS (
   SELECT *
   FROM `__DATASET__.price_snapshots`
   WHERE run_id = @run_id
-),
-history AS (
-  SELECT
-    c.origin,
-    c.destination,
-    c.departure_month,
-    c.run_id AS current_run_id,
-    c.queried_at AS current_queried_at,
-    c.price AS current_price,
-    c.currency,
-    c.airline,
-    c.transfers,
-    c.link,
-    COUNTIF(
-      p.run_id IS NOT NULL
-      AND p.queried_at < c.queried_at
-      AND p.queried_at >= TIMESTAMP_SUB(c.queried_at, INTERVAL 7 DAY)
-    ) AS prior_count_7d,
-    MIN(
-      IF(
-        p.run_id IS NOT NULL
-        AND p.queried_at < c.queried_at
-        AND p.queried_at >= TIMESTAMP_SUB(c.queried_at, INTERVAL 7 DAY),
-        p.price,
-        NULL
-      )
-    ) AS baseline
-  FROM current_snap AS c
-  LEFT JOIN `__DATASET__.price_snapshots` AS p
-    ON p.origin = c.origin
-   AND p.destination = c.destination
-   AND p.departure_month = c.departure_month
-  GROUP BY
-    c.origin, c.destination, c.departure_month, c.run_id, c.queried_at,
-    c.price, c.currency, c.airline, c.transfers, c.link
-),
-scored AS (
-  SELECT
-    *,
-    SAFE_DIVIDE(baseline - current_price, baseline) * 100 AS drop_pct
-  FROM history
 ),
 recent_alerts AS (
   SELECT
@@ -121,29 +92,25 @@ recent_alerts AS (
   GROUP BY origin, destination, departure_month
 )
 SELECT
-  s.current_run_id AS run_id,
-  s.origin,
-  s.destination,
-  s.departure_month,
-  s.current_queried_at AS queried_at,
-  s.current_price AS price,
-  s.baseline,
-  s.drop_pct,
-  s.currency,
-  s.airline,
-  s.transfers,
-  s.link,
-  s.prior_count_7d
-FROM scored AS s
+  c.run_id,
+  c.origin,
+  c.destination,
+  c.departure_month,
+  c.queried_at,
+  c.price,
+  CAST(NULL AS FLOAT64) AS baseline,
+  CAST(NULL AS FLOAT64) AS drop_pct,
+  c.currency,
+  c.airline,
+  c.transfers,
+  c.link,
+  c.flights_json,
+  c.total_duration,
+  0 AS prior_count_7d
+FROM current_snap AS c
 LEFT JOIN recent_alerts AS a
-  ON a.origin = s.origin
- AND a.destination = s.destination
- AND a.departure_month = s.departure_month
-WHERE s.prior_count_7d >= 3
-  AND s.baseline IS NOT NULL
-  AND s.baseline > 0
-  AND s.drop_pct > 20
-  AND (
-    a.last_sent_at IS NULL
-    OR a.last_sent_at < TIMESTAMP_SUB(s.current_queried_at, INTERVAL 24 HOUR)
-  );
+  ON a.origin = c.origin
+ AND a.destination = c.destination
+ AND a.departure_month = c.departure_month
+-- WHERE a.last_sent_at IS NULL
+--    OR a.last_sent_at < TIMESTAMP_SUB(c.queried_at, INTERVAL 24 HOUR);

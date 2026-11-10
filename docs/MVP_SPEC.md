@@ -101,7 +101,7 @@ best_flights = results["best_flights"]
 
 - Giá từ Google Flights qua SerpAPI
 - SerpAPI cần `outbound_date` dạng **`YYYY-MM-DD`** (không nhận tháng)
-- MVP lấy **1 ngày mẫu / tháng** để giữ volume và baseline key theo tháng
+- MVP lấy **1 ngày mẫu / tháng** để giữ volume và key theo ngày bay mẫu
 
 ### Auth `[MVP DECISION]`
 
@@ -176,9 +176,10 @@ Transform chạy bằng **SQL trên BigQuery** (`sql/bq_transform.sql`) sau khi 
 
 ```text
 current = min(price) trong response.best_flights
+          nếu best_flights rỗng/thiếu → min(price) trong other_flights
 ```
 
-Nếu `best_flights` rỗng / thiếu → không tạo snapshot giá; không alert cho key đó.
+Nếu cả `best_flights` và `other_flights` rỗng / thiếu → không tạo snapshot giá; không alert cho key đó.
 
 ### Khóa so sánh (baseline key)
 
@@ -188,38 +189,24 @@ Nếu `best_flights` rỗng / thiếu → không tạo snapshot giá; không ale
 
 Với MVP: `origin` luôn `DAD`.
 
-### Baseline
-
-```text
-baseline = MIN(price) của các price_snapshots trước đó
-           trong cửa sổ 7×24 giờ
-           cùng baseline key
-           KHÔNG gồm run hiện tại
-```
-
-### Công thức giảm giá
-
-```text
-drop_pct = (baseline - current) / baseline * 100
-```
-
 ### Điều kiện gửi alert
 
 Gửi Telegram **khi và chỉ khi** tất cả đúng:
 
-1. Số snapshot lịch sử hợp lệ trong 7 ngày **≥ 3** (warm-up)
-2. `drop_pct > 20`
-3. Chưa có alert **thành công** cho cùng baseline key trong **24 giờ** (anti-spam)
+1. Run hiện tại có `price_snapshots` (đã lấy được `min(price)` từ `best_flights`, fallback `other_flights`)
+2. Chưa có alert **thành công** cho cùng baseline key trong **24 giờ** (anti-spam)
 
-SQL tạo/ghi `price_snapshots` và view/table `alert_candidates`.  
-Python đọc `alert_candidates` → gửi Telegram → insert `alerts`.
+SQL tạo/ghi `price_snapshots` (kèm `flights_json`, `total_duration` của offer thắng) và table `alert_candidates`.  
+Python đọc `alert_candidates` → format chi tiết chuyến bay → gửi Telegram → insert `alerts`.
 
-### Hành vi warm-up / empty / lỗi
+> Warm-up ≥3 và `drop_pct > 20` **không** còn là điều kiện gửi (MVP notify-on-snapshot).
+
+### Hành vi empty / lỗi
 
 | Tình huống | Hành vi |
 |---|---|
-| `< 3` snapshot / 7 ngày | Load raw (+ snapshot nếu có giá); **không alert** |
-| `best_flights` empty/missing | Raw OK; skip snapshot/alert |
+| `best_flights` empty/missing | Dùng `other_flights` nếu có; cả hai rỗng → skip snapshot/alert |
+| Đã alert cùng key trong 24h | Snapshot vẫn ghi; **không** gửi Telegram lại |
 | HTTP 429 | Log; retry 1 lần sau ~5s; không chặn route khác |
 | 401/403 / timeout sau retry | Ghi lỗi; tiếp tục route khác |
 | Load BQ fail | Không Transform/Alert cho run đó; log rõ |
@@ -234,12 +221,11 @@ Python đọc `alert_candidates` → gửi Telegram → insert `alerts`.
 
 ### Nội dung message tối thiểu
 
-- Route label + IATA (`DAD → HAN`)
-- `departure_month`
-- `current_price` (VND)
-- `baseline` (VND)
-- `drop_pct`
-- `airline`, `transfers` (nếu có)
+- Route label + IATA (`DAD → SGN`)
+- `departure_month` (ngày bay mẫu)
+- `price` (VND)
+- Mỗi leg từ `flights_json`: `flight_number`, `airplane`, `travel_class`, dep/arr IATA + time, `duration`
+- `total_duration` / `transfers` khi multi-leg
 - `queried_at` (ICT)
 - `link` (nếu API trả)
 
@@ -303,7 +289,7 @@ best_flights = results["best_flights"]
 
 Checklist:
 
-1. Có `best_flights` và phần tử có `price`
+1. Có `best_flights` hoặc `other_flights` và phần tử có `price`
 2. Currency trong config là `VND`
 3. Thử lần lượt `SGN`, `BKK`, `SIN`, `PQC`
 4. Chạy 1 cycle pipeline: raw xuất hiện trên BQ **trước** khi Transform
@@ -316,13 +302,12 @@ Checklist:
 2. **Origin:** Mọi watched request có `origin=DAD` và đúng 5 destination đã khóa.
 3. **ELT raw-first:** Mỗi call được Load vào BigQuery `raw_flight_prices` (NDJSON load) **trước** Transform.
 4. **Snapshot:** Khi có giá, SQL ghi `min(price)` vào `price_snapshots`.
-5. **Alert:** Đủ warm-up ≥3 và `drop_pct > 20` → Telegram đủ field; ghi `alerts`.
+5. **Alert:** Có snapshot giá → Telegram đủ field chuyến bay (`flights_json`); ghi `alerts`.
 6. **Anti-spam:** Không gửi lại cùng key trong 24h.
-7. **Warm-up:** `<3` snapshot → không alert.
-8. **API hygiene:** SerpAPI `engine=google_flights`; currency từ `config/serpapi_query.json`.
-9. **No CSV on hot path:** Staging raw là NDJSON, không CSV.
-10. **Deploy:** Chạy trên VPS bằng Cron + SA; secret không nằm trong git.
-11. **Narrative:** Bảo vệ gọi đúng **ELT** + BigQuery; nêu date-sampling (1 ngày/tháng).
+7. **API hygiene:** SerpAPI `engine=google_flights`; currency từ `config/serpapi_query.json`.
+8. **No CSV on hot path:** Staging raw là NDJSON, không CSV.
+9. **Deploy:** Chạy trên VPS bằng Cron + SA; secret không nằm trong git.
+10. **Narrative:** Bảo vệ gọi đúng **ELT** + BigQuery; nêu date-sampling (1 ngày/tháng).
 
 ---
 
@@ -350,7 +335,7 @@ Checklist:
 | CSV làm mất nested JSON | Chỉ NDJSON cho raw |
 | SA key / SerpAPI key lộ | `.gitignore`; không commit |
 | Một số chặng data mỏng | Smoke test; đổi destination sau nếu cần |
-| Warm-up làm demo chưa alert | Seed / chạy ≥3 chu kỳ |
+| Anti-spam 24h chặn demo liên tiếp | Đợi 24h hoặc xóa row `alerts` test |
 
 ---
 
@@ -360,13 +345,12 @@ Checklist:
 |---|---|
 | Origin | Luôn `DAD` |
 | Destinations | `HAN`, `SGN`, `BKK`, `SIN`, `PQC` |
-| Baseline | `MIN` 7 ngày (không dùng AVG) |
-| Ngưỡng | `drop_pct > 20` |
-| Warm-up | ≥ 3 snapshots |
+| Alert trigger | Có `price_snapshots` trong run (notify-on-snapshot) |
+| Flight detail | Option B: `flights_json` + `total_duration` trên snapshot |
 | Anti-spam | 24 giờ / baseline key |
 | Channel | Telegram only |
 | Currency param | `currency=VND` (config) |
-| Source | SerpAPI `google_flights` / `best_flights` |
+| Source | SerpAPI `google_flights` / `best_flights` (fallback `other_flights`) |
 | Date sampling | 1 `outbound_date` / tháng |
 | Horizon | Tháng hiện tại + 2 tháng |
 | Architecture | **ELT** |
