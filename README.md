@@ -7,7 +7,7 @@ Chi tiết nghiệp vụ: [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md).
 ## Kiến trúc (ELT, không phải ETL cổ điển)
 
 ```text
-Cron (ICT 00/05/10/15/20)
+Cron / Cloud Scheduler (ICT 08:00, 20:00)
   → Extract SerpAPI Google Flights (DAD → SGN × hôm nay..+HORIZON_DAYS)
   → Stage NDJSON (không CSV — payload nested)
   → Load GCS → BigQuery raw_flight_prices
@@ -83,9 +83,10 @@ python main.py --init-schema
 
 - **Option A (recommend):** Cloud Run Job + Cloud Scheduler — [`docs/DEPLOY_CLOUD_RUN.md`](docs/DEPLOY_CLOUD_RUN.md)  
   Build/update job: `PROJECT_ID=... GCS_BUCKET=... ./scripts/deploy_cloud_run.sh`  
+  Create/update cron (08:00 & 20:00 ICT): `PROJECT_ID=... ./scripts/deploy_scheduler.sh`  
   Check log / executions: §8 + nhật ký deploy §13 trong doc đó  
   Sync secrets từ `.env` → Job: `PROJECT_ID=... ./scripts/sync_job_secrets_from_env.sh`
-- **VPS / GCE:** xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, 5 mốc/ngày.
+- **VPS / GCE:** xem [`crontab`](crontab) — `TZ=Asia/Ho_Chi_Minh`, `0 8,20 * * *`.
 
 ## Routes MVP
 
@@ -125,5 +126,6 @@ sql/bq_transform.sql
 Dockerfile                      # Cloud Run Job image
 scripts/init_bq_schema.py
 scripts/deploy_cloud_run.sh     # build + create/update Job
+scripts/deploy_scheduler.sh     # create/update Cloud Scheduler (08:00/20:00 ICT)
 crontab                         # VPS/GCE fallback
 ```

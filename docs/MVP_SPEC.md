@@ -13,8 +13,8 @@ Tự động quét giá vé máy bay (cached) theo lịch cố định trong ng�
 
 Đáp ứng yêu cầu đồ án `[FACT]`:
 
-- Chạy tự động **5 lần/ngày**, mỗi lần cách **5 giờ**
-- Tự setup / chạy trên VPS
+- Chạy tự động **2 lần/ngày** (08:00 và 20:00 ICT) `[MVP DECISION]`
+- Tự setup / chạy trên VPS hoặc Cloud Run Job + Scheduler
 - Pipeline dữ liệu thực tế (**ELT** trên BigQuery)
 
 ---
@@ -80,8 +80,8 @@ Tự động quét giá vé máy bay (cached) theo lịch cố định trong ng�
 | Mục | Giá trị |
 |---|---|
 | Timezone | `Asia/Ho_Chi_Minh` |
-| Các mốc | `00:00`, `05:00`, `10:00`, `15:00`, `20:00` |
-| Cron | `0 0,5,10,15,20 * * *` (kèm `TZ=Asia/Ho_Chi_Minh`) |
+| Các mốc | `08:00`, `20:00` `[MVP DECISION]` |
+| Cron | `0 8,20 * * *` (kèm `TZ=Asia/Ho_Chi_Minh`) |
 
 ---
 
@@ -298,7 +298,7 @@ Checklist:
 
 ## 13. Acceptance Criteria
 
-1. **Schedule:** Pipeline chạy đúng 5 mốc ICT mỗi ngày.
+1. **Schedule:** Pipeline chạy đúng 2 mốc ICT mỗi ngày (08:00, 20:00).
 2. **Origin:** Mọi watched request có `origin=DAD` và đúng 5 destination đã khóa.
 3. **ELT raw-first:** Mỗi call được Load vào BigQuery `raw_flight_prices` (NDJSON load) **trước** Transform.
 4. **Snapshot:** Khi có giá, SQL ghi `min(price)` vào `price_snapshots`.
@@ -319,7 +319,7 @@ Checklist:
 - [x] `config/routes.json` (5 chặng DAD-*)
 - [x] `config/serpapi_query.json` (query params)
 - [x] Worker: extract → stage NDJSON → load → transform SQL → alert
-- [x] Cron template 5 slots + TZ (`crontab`)
+- [x] Cron template 08:00/20:00 + TZ (`crontab` / Cloud Scheduler)
 - [x] `.env.example` + `.gitignore` (SA key)
 - [ ] Deploy Cloud Run Job + Scheduler (xem `docs/DEPLOY_CLOUD_RUN.md`)
 - [x] README: cách chạy, ELT, date-sampling SerpAPI

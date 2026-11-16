@@ -3,7 +3,7 @@
 Batch ELT worker (`python main.py`) trên Google Cloud: **không** giữ HTTP server 24/7.
 
 ```text
-Cloud Scheduler (ICT 00/05/10/15/20)
+Cloud Scheduler (ICT 08:00, 20:00)
   → Cloud Run Job
   → python main.py
       SerpAPI → NDJSON → GCS → BigQuery → Telegram
@@ -229,15 +229,23 @@ gcloud run jobs add-iam-policy-binding "${JOB_NAME}" \
 
 ---
 
-## 7. Cloud Scheduler (5 mốc ICT)
+## 7. Cloud Scheduler (08:00 & 20:00 ICT)
 
-Một cron đủ 5 slot (giống `crontab` trong repo):
+**Khuyến nghị:** create/update bằng script (Job `sale-flight-elt` phải đã tồn tại):
+
+```bash
+export PROJECT_ID=project-81bd20d6-d241-49b7-acf
+./scripts/deploy_scheduler.sh
+# default: --schedule="0 8,20 * * *" --time-zone=Asia/Ho_Chi_Minh
+```
+
+Hoặc tay:
 
 ```bash
 gcloud scheduler jobs create http sale-flight-elt-cron \
   --location="${REGION}" \
   --project="${PROJECT_ID}" \
-  --schedule="0 0,5,10,15,20 * * *" \
+  --schedule="0 8,20 * * *" \
   --time-zone="Asia/Ho_Chi_Minh" \
   --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
   --http-method=POST \
@@ -245,10 +253,9 @@ gcloud scheduler jobs create http sale-flight-elt-cron \
   --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
 ```
 
-> Nếu API URI đổi theo version `gcloud`, dùng Console: **Cloud Scheduler → Run Job target**, hoặc:
-> `gcloud run jobs execute` documented HTTP target từ Cloud Console “Create scheduler”.
+> Nếu job scheduler đã có: `gcloud scheduler jobs update http …` (script lo create-or-update).
 
-- [ ] Schedule `0 0,5,10,15,20 * * *`
+- [ ] Schedule `0 8,20 * * *`
 - [ ] Time zone `Asia/Ho_Chi_Minh`
 - [ ] OAuth SA = scheduler SA
 
@@ -378,7 +385,7 @@ gcloud logging read \
 
 **Console:** Cloud Scheduler → `sale-flight-elt-cron` → lịch sử / rồi sang Cloud Run Executions để đọc log `main.py`.
 
-- [ ] Schedule `0 0,5,10,15,20 * * *`
+- [ ] Schedule `0 8,20 * * *`
 - [ ] Time zone `Asia/Ho_Chi_Minh`
 - [ ] OAuth SA = scheduler SA
 - [ ] Trigger tạo execution Job mới trên Cloud Run
@@ -413,7 +420,8 @@ gcloud logging read \
 |---|---|
 | `Dockerfile` | Image chạy `python main.py` |
 | `.dockerignore` | Loại `.env`, secrets, staging raw, tests/docs |
-| `scripts/deploy_cloud_run.sh` | Build + create/update Job (cần IAM/secrets/scheduler làm trước theo §§1–3,6–7) |
+| `scripts/deploy_cloud_run.sh` | Build + create/update Job (cần IAM/secrets theo §§1–3) |
+| `scripts/deploy_scheduler.sh` | Create/update Cloud Scheduler → Job (`0 8,20 * * *` ICT) |
 
 ```bash
 export PROJECT_ID=...
@@ -462,7 +470,7 @@ Runtime SA: `sale-flight-runner@…`
 
 | # | Bước | Ghi chú |
 |---|---|---|
-| A | Cloud Scheduler `sale-flight-elt-cron` (§7) | Chưa thấy xác nhận trong session deploy; làm khi muốn 5 mốc/ngày |
+| A | Cloud Scheduler `sale-flight-elt-cron` (§7) | Chạy `./scripts/deploy_scheduler.sh` (08:00 & 20:00 ICT) |
 | B | Secret `SERPAPI_API_KEY` giá trị thật | Log `ff7mb` có `401` + `api_key=YOUR_SERPAPI_KEY` → đang placeholder; `versions add` key thật rồi execute lại |
 | C | `alerts_sent` | Lần `ff7mb`: `candidates=0` (sau 401 extract `status=0`); sau khi key đúng còn có thể dính anti-spam 24h |
 
